@@ -1,0 +1,5 @@
+imports_granularity = "Crate"
+group_imports = "StdExternalCrate"
+hex_literal_case = "Lower"
+unstable_features = true
+reorder_impl_items = true
