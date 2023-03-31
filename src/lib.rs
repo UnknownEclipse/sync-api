@@ -7,5 +7,5 @@ mod once_cell;
 // mod raw_std;
 
 pub use lazy::Lazy;
-pub use once::{Once, RawOnce};
+pub use once::{Once, OnceState, RawOnce};
 pub use once_cell::OnceCell;
