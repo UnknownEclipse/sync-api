@@ -1,6 +1,7 @@
 use core::{cell::UnsafeCell, convert::Infallible, fmt::Debug, mem};
 
 use super::once::RawOnce;
+use crate::into_ok;
 
 pub struct OnceLock<R, T> {
     once: R,
@@ -58,10 +59,11 @@ where
 
         let mut value = Some(value);
 
-        self.once.call(|_| unsafe {
+        let res = self.once.call(|_| unsafe {
             *self.value.get() = value.take();
             Ok::<_, Infallible>(())
         });
+        into_ok(res);
 
         match value {
             Some(value) => Err(value),
@@ -83,7 +85,7 @@ where
     where
         F: FnOnce() -> T,
     {
-        self.get_or_try_init::<_, Infallible>(|| Ok(f())).unwrap()
+        into_ok(self.get_or_try_init::<_, Infallible>(|| Ok(f())))
     }
 
     pub fn get_or_try_init<F, E>(&self, f: F) -> Result<&T, E>
