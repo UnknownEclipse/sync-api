@@ -1,14 +1,34 @@
-// This is copied from OnceCell`s std impl, with a few changes:
-// 1. The wait option has been removed
-// 2. Poisoning has been added
-
 use std::{
     cell::Cell,
-    sync::atomic::{AtomicBool, AtomicPtr, Ordering},
+    sync::{
+        atomic::{AtomicBool, AtomicPtr, Ordering},
+        Barrier,
+    },
     thread::{self, Thread},
 };
 
-use crate::{once::OnceState, RawOnce};
+use sync_api::{OnceLock, OnceState, RawOnce};
+
+fn main() {
+    let value = OnceLock::<RawStdOnce, _>::new();
+    let barrier = Barrier::new(4);
+
+    thread::scope(|s| {
+        s.spawn(|| {
+            let s = value.get_or_init(|| String::from("follower"));
+            barrier.wait();
+            assert_eq!(s, "leader");
+        });
+
+        for _ in 1..4 {
+            s.spawn(|| {
+                barrier.wait();
+                let s = value.get_or_init(|| String::from("follower"));
+                assert_eq!(s, "leader");
+            });
+        }
+    });
+}
 
 pub struct RawStdOnce {
     queue: AtomicPtr<Waiter>,
@@ -16,11 +36,11 @@ pub struct RawStdOnce {
 
 unsafe impl RawOnce for RawStdOnce {
     #[allow(clippy::declare_interior_mutable_const)]
-    const COMPLETED: Self = Self {
+    const COMPLETE: Self = Self {
         queue: AtomicPtr::new(INCOMPLETE_PTR),
     };
     #[allow(clippy::declare_interior_mutable_const)]
-    const INIT: Self = Self {
+    const INCOMPLETE: Self = Self {
         queue: AtomicPtr::new(COMPLETE_PTR),
     };
 
@@ -30,8 +50,28 @@ unsafe impl RawOnce for RawStdOnce {
     }
 
     #[inline]
-    fn call(&self, f: &mut dyn FnMut(&OnceState) -> bool) {
-        initialize_or_wait(&self.queue, f);
+    fn call<F, E>(&self, f: F) -> Result<(), E>
+    where
+        F: FnOnce(&OnceState) -> Result<(), E>,
+    {
+        let mut f = Some(f);
+        let mut err = None;
+
+        initialize_or_wait(&self.queue, &mut |once_state| {
+            let f = unsafe { f.take().unwrap_unchecked() };
+            match f(once_state) {
+                Ok(_) => true,
+                Err(e) => {
+                    err = Some(e);
+                    false
+                }
+            }
+        });
+
+        match err {
+            Some(err) => Err(err),
+            None => Ok(()),
+        }
     }
 }
 

@@ -5,3 +5,23 @@ edition = "2021"
 
 [dev-dependencies]
 spin = "0.9.7"
+critical-section = "1.1.1"
+parking_lot_core = "0.9"
+
+[features]
+default = ["std"]
+std = []
+
+[dependencies]
+
+[[example]]
+name = "spin"
+
+[[example]]
+name = "critical_section"
+
+[[example]]
+name = "parking_lot"
+
+[[example]]
+name = "std"

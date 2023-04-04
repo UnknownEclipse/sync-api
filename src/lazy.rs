@@ -3,26 +3,26 @@ use core::{
     ops::{Deref, DerefMut},
 };
 
-use super::{once::RawOnce, once_cell::OnceCell};
+use crate::{OnceLock, RawOnce};
 
-pub struct Lazy<R, T, F = fn() -> T> {
-    cell: OnceCell<R, T>,
+pub struct LazyLock<R, T, F = fn() -> T> {
+    cell: OnceLock<R, T>,
     init: Cell<Option<F>>,
 }
 
-impl<R, T, F> Lazy<R, T, F>
+impl<R, T, F> LazyLock<R, T, F>
 where
     R: RawOnce,
 {
     pub const fn new(init: F) -> Self {
         Self {
-            cell: OnceCell::new(),
+            cell: OnceLock::new(),
             init: Cell::new(Some(init)),
         }
     }
 }
 
-impl<R, T, F> Lazy<R, T, F>
+impl<R, T, F> LazyLock<R, T, F>
 where
     R: RawOnce,
     F: FnOnce() -> T,
@@ -37,35 +37,37 @@ where
     pub fn force_mut(this: &mut Self) -> &mut T {
         if this.cell.get_mut().is_none() {
             let init = unsafe { this.init.take().unwrap_unchecked() };
-            this.cell = OnceCell::with_value(init());
+            this.cell = OnceLock::with_value(init());
         }
         unsafe { this.cell.get_mut().unwrap_unchecked() }
     }
 }
 
-impl<R, T, F> Deref for Lazy<R, T, F>
+impl<R, T, F> Deref for LazyLock<R, T, F>
 where
     R: RawOnce,
     F: FnOnce() -> T,
 {
     type Target = T;
 
+    #[inline]
     fn deref(&self) -> &Self::Target {
         Self::force(self)
     }
 }
 
-impl<R, T, F> DerefMut for Lazy<R, T, F>
+impl<R, T, F> DerefMut for LazyLock<R, T, F>
 where
     R: RawOnce,
     F: FnOnce() -> T,
 {
+    #[inline]
     fn deref_mut(&mut self) -> &mut Self::Target {
         Self::force_mut(self)
     }
 }
 
-impl<R, T> Default for Lazy<R, T>
+impl<R, T> Default for LazyLock<R, T>
 where
     R: RawOnce,
     T: Default,
@@ -75,9 +77,10 @@ where
     }
 }
 
-unsafe impl<R, T, F> Sync for Lazy<R, T, F>
+unsafe impl<R, T, F> Sync for LazyLock<R, T, F>
 where
-    T: Sync,
-    R: Sync,
+    T: Sync + Send,
+    R: Sync + Send,
+    F: Send,
 {
 }

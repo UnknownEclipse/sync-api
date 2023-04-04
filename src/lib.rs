@@ -1,11 +1,10 @@
 #![no_std]
 
+mod exclusive_cell;
 mod lazy;
 mod once;
-mod once_cell;
-// mod raw_spin;
-// mod raw_std;
+mod once_lock;
 
-pub use lazy::Lazy;
+pub use lazy::LazyLock;
 pub use once::{Once, OnceState, RawOnce};
-pub use once_cell::OnceCell;
+pub use once_lock::OnceLock;

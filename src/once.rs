@@ -1,4 +1,4 @@
-use core::fmt::Debug;
+use core::{convert::Infallible, fmt::Debug};
 
 #[derive(Debug)]
 pub struct OnceState {
@@ -8,6 +8,10 @@ pub struct OnceState {
 impl OnceState {
     pub fn new() -> Self {
         Self { is_poisoned: false }
+    }
+
+    pub fn poisoned() -> Self {
+        Self { is_poisoned: true }
     }
 
     pub fn poison(&mut self) -> &mut Self {
@@ -35,7 +39,7 @@ where
     R: RawOnce,
 {
     pub const fn new() -> Self {
-        Self { raw: R::INIT }
+        Self { raw: R::INCOMPLETE }
     }
 
     pub fn call_once<F>(&self, f: F)
@@ -54,16 +58,15 @@ where
     where
         F: FnOnce(&OnceState),
     {
-        if self.is_completed() {
-            return;
-        }
-
-        let mut f = Some(f);
-        self.raw.call(&mut |state| {
-            let f = unsafe { f.take().unwrap_unchecked() };
-            f(state);
-            true
+        let r = self.try_call_once_force(|once_state| {
+            f(once_state);
+            Ok::<_, Infallible>(())
         });
+
+        match r {
+            Ok(_) => {}
+            Err(e) => match e {},
+        }
     }
 
     pub fn try_call_once<F, E>(&self, f: F) -> Result<(), E>
@@ -83,27 +86,9 @@ where
         F: FnOnce(&OnceState) -> Result<(), E>,
     {
         if self.is_completed() {
-            return Ok(());
-        }
-
-        let mut f = Some(f);
-        let mut err = None;
-
-        self.raw.call(&mut |state| {
-            let f = unsafe { f.take().unwrap_unchecked() };
-
-            match f(state) {
-                Ok(_) => true,
-                Err(e) => {
-                    err = Some(e);
-                    false
-                }
-            }
-        });
-
-        match err {
-            Some(err) => Err(err),
-            None => Ok(()),
+            Ok(())
+        } else {
+            self.raw.call(f)
         }
     }
 
@@ -138,8 +123,8 @@ where
 /// The `[try_]call_once` methods must work correctly. Other primitives depend on this
 /// contract for their own safety.
 pub unsafe trait RawOnce {
-    const INIT: Self;
-    const COMPLETED: Self;
+    const INCOMPLETE: Self;
+    const COMPLETE: Self;
 
     /// Check if the once has completed successfully.
     fn is_completed(&self) -> bool;
@@ -162,5 +147,7 @@ pub unsafe trait RawOnce {
     /// This is a single function designed to be called in the slow
     /// path, so implementations will likely wish to annotate it with #[cold] and
     /// #[inline(never)]
-    fn call(&self, f: &mut dyn FnMut(&OnceState) -> bool);
+    fn call<F, E>(&self, f: F) -> Result<(), E>
+    where
+        F: FnOnce(&OnceState) -> Result<(), E>;
 }

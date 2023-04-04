@@ -2,25 +2,25 @@ use core::{cell::UnsafeCell, convert::Infallible, fmt::Debug, mem};
 
 use super::once::RawOnce;
 
-pub struct OnceCell<R, T> {
+pub struct OnceLock<R, T> {
     once: R,
     value: UnsafeCell<Option<T>>,
 }
 
-impl<R, T> OnceCell<R, T>
+impl<R, T> OnceLock<R, T>
 where
     R: RawOnce,
 {
     pub const fn new() -> Self {
         Self {
-            once: R::INIT,
+            once: R::INCOMPLETE,
             value: UnsafeCell::new(None),
         }
     }
 
     pub const fn with_value(value: T) -> Self {
         Self {
-            once: R::COMPLETED,
+            once: R::COMPLETE,
             value: UnsafeCell::new(Some(value)),
         }
     }
@@ -58,10 +58,9 @@ where
 
         let mut value = Some(value);
 
-        self.once.call(&mut |_| unsafe {
-            let value = value.take().unwrap_unchecked();
-            *self.value.get() = Some(value);
-            true
+        self.once.call(|_| unsafe {
+            *self.value.get() = value.take();
+            Ok::<_, Infallible>(())
         });
 
         match value {
@@ -94,43 +93,37 @@ where
         if let Some(value) = self.get() {
             Ok(value)
         } else {
-            self.get_or_try_init_slow(f)
-        }
-    }
-
-    #[cold]
-    fn get_or_try_init_slow<F, E>(&self, f: F) -> Result<&T, E>
-    where
-        F: FnOnce() -> Result<T, E>,
-    {
-        let mut f = Some(f);
-        let mut err = None;
-
-        self.once.call(&mut |_| {
-            let f = unsafe { f.take().unwrap_unchecked() };
-            let result = f();
-
-            match result {
-                Ok(value) => unsafe {
+            self.once.call(|_| {
+                let value = f()?;
+                unsafe {
                     *self.value.get() = Some(value);
-                    true
-                },
-                Err(e) => {
-                    err = Some(e);
-                    false
                 }
-            }
-        });
-
-        if let Some(err) = err {
-            Err(err)
-        } else {
+                Ok(())
+            })?;
             Ok(unsafe { self.get_unchecked() })
         }
     }
+
+    // #[cold]
+    // fn initialize<F, E>(&self, f: F) -> Result<(), E>
+    // where
+    //     F: FnOnce() -> Result<T, E>,
+    // {
+    //     let mut result = Ok(());
+    //     let slot = self.value.get();
+
+    //     self.once.call(|once| match f() {
+    //         Ok(value) => unsafe {
+    //             (*slot) = Some(value);
+    //         },
+    //         Err(err) => {
+    //             result = Err(err);
+    //         }
+    //     });
+    // }
 }
 
-impl<R, T> Clone for OnceCell<R, T>
+impl<R, T> Clone for OnceLock<R, T>
 where
     R: RawOnce,
     T: Clone,
@@ -144,7 +137,7 @@ where
     }
 }
 
-impl<R, T> Debug for OnceCell<R, T>
+impl<R, T> Debug for OnceLock<R, T>
 where
     R: RawOnce,
     T: Debug,
@@ -156,7 +149,7 @@ where
     }
 }
 
-impl<R, T> Default for OnceCell<R, T>
+impl<R, T> Default for OnceLock<R, T>
 where
     R: RawOnce,
 {
@@ -165,14 +158,14 @@ where
     }
 }
 
-unsafe impl<R, T> Sync for OnceCell<R, T>
+unsafe impl<R, T> Sync for OnceLock<R, T>
 where
     R: Send + Sync,
     T: Send + Sync,
 {
 }
 
-unsafe impl<R, T> Send for OnceCell<R, T>
+unsafe impl<R, T> Send for OnceLock<R, T>
 where
     R: Send,
     T: Send,
